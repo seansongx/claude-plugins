@@ -7,7 +7,7 @@
 | 组成 | 作用 |
 |---|---|
 | **Skill** `tailwind-tokens` | 写样式前先找到或建立 token（`:root` 语义变量 + `@theme`）；组件只用语义类名；新值先加 token 再用 |
-| **Hook**（PostToolUse） | AI 每次改完样式文件，自动检查**新写入的内容**，发现硬编码就把问题反馈给 AI，让它当场改掉 |
+| **Hook**（PostToolUse） | AI 每次改完样式文件，自动检查，**只报这次改动新引入的硬编码**（原本就有的不报），把问题反馈给 AI，让它当场改掉 |
 | **命令** `/tailwind-tokens:tokens-audit` | 给已有项目做一次体检，统计硬编码的位置和最常见的颜色，给出归并成 token 的方案 |
 
 ## 安装
@@ -34,8 +34,15 @@
 - 一次性的布局尺寸，如 `w-[320px]`、`h-[100dvh]`
 - token 定义本身：CSS 自定义属性 `--xxx: #fff`、`tailwind.config.*`
 - `node_modules`、`dist`、`.next` 等构建目录
+- 注释行，以及选择器里的属性值，如 `[&_.dot[stroke='#fff']]:…`、`.dot[stroke='#fff']`
 
 单行豁免：在该行写 `token-ignore`（例如 `/* token-ignore */`）。
+
+## shadcn/ui 项目
+
+检测到 `components.json` 时：
+- **审计默认跳过 shadcn 组件目录**（`aliases.ui`，通常是 `components/ui/`）。这是上游代码，像 checkbox 的 `rounded-[4px]` 这类有意调的细节，不应该为了过检查去改，改了以后用 `npx shadcn diff` 更新时还会冲突。
+- **hook 仍然检查这个目录，但只报新写的内容**。定制 shadcn 组件时，新加的样式仍然要用 token。
 
 ## 项目配置（可选）
 
@@ -45,12 +52,20 @@
 {
   "disabled": false,
   "allowPaletteColors": false,
+  "auditShadcnUi": false,
   "ignore": ["src/legacy/**", "**/*.stories.tsx"]
 }
 ```
 
 - `allowPaletteColors`：老项目暂时不想管色板类名时设为 `true`
+- `auditShadcnUi`：审计时也检查 shadcn 组件目录
 - `ignore`：跳过的路径（glob，相对项目根）
+
+## 更新记录
+
+- **0.2.0**：hook 只报新引入的问题；自动识别 shadcn/ui，审计时跳过组件目录；不再误报注释和选择器
+- **0.1.1**：缺少的尺寸、圆角、字号先就近对齐，确实需要再新增 token
+- **0.1.0**：首个版本
 
 ## 在 CI 里用
 

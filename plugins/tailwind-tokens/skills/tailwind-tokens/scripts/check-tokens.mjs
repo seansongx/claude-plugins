@@ -3,15 +3,17 @@
 //
 // 两种用法：
 //   1. Hook 模式（无参数）：从 stdin 读取 Claude Code PostToolUse 的 JSON，
-//      只检查这次 Edit / Write / MultiEdit 新写入的内容。发现问题时 exit 2，
-//      把问题写到 stderr，Claude 会看到并修正。
+//      只报告这次 Edit / Write / MultiEdit **新引入**的问题（被替换的旧内容里本来
+//      就有的不报）。发现问题时 exit 2，把问题写到 stderr，Claude 会看到并修正。
 //   2. 审计模式：node check-tokens.mjs --audit [目录]
 //      扫描整个目录，按文件列出问题并汇总。有问题时 exit 1，可用于 CI / lint-staged。
+//      检测到 shadcn/ui（components.json）时，默认跳过它的组件目录。
 //
 // 项目配置（可选）：<项目根>/.claude/tailwind-tokens.json
 //   {
 //     "disabled": false,            // true 时完全关闭检查
 //     "allowPaletteColors": false,  // true 时允许 bg-blue-500 这类原始色板类名
+//     "auditShadcnUi": false,       // true 时审计也包含 shadcn 的 components/ui
 //     "ignore": ["src/legacy/**", "**/*.stories.tsx"]
 //   }
 //
@@ -119,35 +121,67 @@ function findProjectRoot(start) {
   }
 }
 
-function loadConfig(root) {
-  const file = path.join(root, '.claude', 'tailwind-tokens.json');
+// 读取 shadcn/ui 的 components.json，返回组件目录（如 "components/ui"）
+function detectShadcnUi(root) {
   try {
-    const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return {
-      disabled: !!cfg.disabled,
-      allowPaletteColors: !!cfg.allowPaletteColors,
-      ignore: (cfg.ignore || []).map(globToRegExp),
-    };
+    const cfg = JSON.parse(fs.readFileSync(path.join(root, 'components.json'), 'utf8'));
+    const alias = cfg.aliases?.ui || (cfg.aliases?.components ? `${cfg.aliases.components}/ui` : '@/components/ui');
+    // "@/components/ui"、"~/components/ui"、"$lib/components/ui" → "components/ui"
+    const dir = alias.replace(/^[@~$][^/]*\//, '').replace(/^\.?\//, '').replace(/\/+$/, '');
+    return dir || null;
   } catch {
-    return { disabled: false, allowPaletteColors: false, ignore: [] };
+    return null;
   }
 }
 
-function shouldCheck(file, root, cfg) {
+function loadConfig(root) {
+  let raw = {};
+  try {
+    raw = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'tailwind-tokens.json'), 'utf8'));
+  } catch { /* 没有配置文件就用默认值 */ }
+  const shadcnUiDir = detectShadcnUi(root);
+  return {
+    disabled: !!raw.disabled,
+    allowPaletteColors: !!raw.allowPaletteColors,
+    auditShadcnUi: !!raw.auditShadcnUi,
+    ignore: (raw.ignore || []).map(globToRegExp),
+    shadcnUiDir,
+    shadcnUi: shadcnUiDir ? globToRegExp(`**/${shadcnUiDir}/**`) : null,
+  };
+}
+
+function shouldCheck(file, root, cfg, mode) {
   if (!STYLE_EXTS.has(path.extname(file).toLowerCase())) return false;
   const rel = toPosix(path.relative(root, file));
   if (SKIP_FILE.test(rel)) return false;
   if (rel.split('/').some((seg) => SKIP_DIRS.has(seg))) return false;
   if (cfg.ignore.some((re) => re.test(rel))) return false;
+  // shadcn 组件是上游代码：审计时默认跳过；hook 仍然检查，但只报新引入的问题
+  if (mode === 'audit' && cfg.shadcnUi && !cfg.auditShadcnUi && cfg.shadcnUi.test(rel)) return false;
   return true;
+}
+
+// 把选择器里的内容抹掉，避免误报：
+//   Tailwind 任意变体  [&_.recharts-dot[stroke='#fff']]:stroke-transparent
+//   CSS 属性选择器      .dot[stroke='#fff'] { … }
+const VARIANT_SELECTOR = /\[(?:[^[\]]|\[[^[\]]*\])*\](?=:)/g;
+const ATTR_SELECTOR = /\[\s*[\w-]+\s*[~|^$*]?=\s*(['"]).*?\1\s*\]/g;
+const blank = (s) => ' '.repeat(s.length);
+
+// 纯注释行（// …、/* …、 * …、<!-- …、{/* … */}）里的类名不是真正的样式
+const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*(?:\s|\/|$)(?!\s*\{)|<!--|\{\s*\/\*)/;
+function stripSelectors(line) {
+  return line.replace(VARIANT_SELECTOR, blank).replace(ATTR_SELECTOR, blank);
 }
 
 // 扫描一段文本，lineOffset 是这段文本第一行在文件里的行号
 function scan(text, lineOffset, cfg) {
   const findings = [];
   const lines = text.split(/\r?\n/);
-  lines.forEach((line, i) => {
-    if (line.includes('token-ignore')) return;
+  lines.forEach((rawLine, i) => {
+    if (rawLine.includes('token-ignore')) return;
+    if (COMMENT_LINE.test(rawLine)) return;
+    const line = stripSelectors(rawLine);
     for (const rule of RULES) {
       if (rule.palette && cfg.allowPaletteColors) continue;
       rule.re.lastIndex = 0;
@@ -214,24 +248,42 @@ async function hookMode() {
   let full = '';
   try { full = fs.readFileSync(file, 'utf8'); } catch { /* 文件读不到就按片段行号 */ }
 
-  // 只检查这次新写入的内容，避免旧代码里的问题反复打扰
-  let snippets;
-  if (typeof ti.content === 'string') snippets = [ti.content];
-  else if (Array.isArray(ti.edits)) snippets = ti.edits.map((e) => e.new_string).filter(Boolean);
-  else if (typeof ti.new_string === 'string') snippets = [ti.new_string];
-  else return 0;
+  // 每一处改动是 [旧内容, 新内容]。只报新内容里新出现的问题：
+  // 旧内容里本来就有的（例如 shadcn 原有的 rounded-[4px]、老代码里的 bg-blue-500）不报。
+  let pairs;
+  if (typeof ti.content === 'string') {
+    const tr = input.tool_response || {};
+    const original = typeof tr.originalFile === 'string' ? tr.originalFile : '';
+    pairs = [[original, ti.content, 1]];
+  } else if (Array.isArray(ti.edits)) {
+    pairs = ti.edits.filter((e) => e.new_string).map((e) => [e.old_string || '', e.new_string]);
+  } else if (typeof ti.new_string === 'string') {
+    pairs = [[ti.old_string || '', ti.new_string]];
+  } else {
+    return 0;
+  }
 
   const findings = [];
-  for (const s of snippets) {
-    const start = typeof ti.content === 'string' ? 1 : lineOf(full, s) ?? 1;
-    findings.push(...scan(s, start, cfg));
+  for (const [oldText, newText, fixedStart] of pairs) {
+    const start = fixedStart ?? lineOf(full, newText) ?? 1;
+    const existing = new Map();
+    for (const f of scan(oldText, 1, cfg)) {
+      const k = `${f.rule}\u0000${f.match}`;
+      existing.set(k, (existing.get(k) || 0) + 1);
+    }
+    for (const f of scan(newText, start, cfg)) {
+      const k = `${f.rule}\u0000${f.match}`;
+      const n = existing.get(k) || 0;
+      if (n > 0) existing.set(k, n - 1);
+      else findings.push(f);
+    }
   }
   if (!findings.length) return 0;
 
   const rel = toPosix(path.relative(root, file)) || file;
   const { text, total } = formatFindings(new Map([[rel, findings]]), 30);
   process.stderr.write(
-    `[tailwind-tokens] 刚写入的内容里有 ${total} 处没有使用设计 token：\n\n${text}\n\n` +
+    `[tailwind-tokens] 这次改动新引入了 ${total} 处没有使用设计 token 的写法：\n\n${text}\n\n` +
     '请改成 token：先在 token 文件（@theme / :root）里找已有的值，没有就先加一个语义命名的 token 再引用。\n' +
     '确实无法用 token 的（例如第三方库必须传色值），在该行加注释 token-ignore，并向用户说明原因。\n',
   );
@@ -247,7 +299,7 @@ function walk(dir, root, cfg, files = []) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) {
       if (!SKIP_DIRS.has(e.name)) walk(p, root, cfg, files);
-    } else if (e.isFile() && shouldCheck(p, root, cfg)) {
+    } else if (e.isFile() && shouldCheck(p, root, cfg, 'audit')) {
       files.push(p);
     }
   }
@@ -278,6 +330,13 @@ function auditMode(target) {
       const key = literal ? literal[0].toLowerCase() : f.rule === 'palette-color' ? f.match.replace(/^.*?-(?=[a-z]+-\d+$)/, '') : null;
       if (key) colorCount.set(key, (colorCount.get(key) || 0) + 1);
     }
+  }
+
+  if (cfg.shadcnUi && !cfg.auditShadcnUi) {
+    console.log(
+      `[tailwind-tokens] 检测到 shadcn/ui，已跳过组件目录 ${cfg.shadcnUiDir}/` +
+      '（上游代码，不为了过检查去改；要包含它，在 .claude/tailwind-tokens.json 设 "auditShadcnUi": true）\n',
+    );
   }
 
   if (!byFile.size) {

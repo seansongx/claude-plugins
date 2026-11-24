@@ -207,9 +207,21 @@ const primary = css.getPropertyValue('--primary').trim();
 
 图表配色可以加一组 `--chart-1` … `--chart-5` token。实在只能写死的（例如邮件模板不支持 CSS 变量），在该行加注释 `token-ignore`，并告诉用户原因。
 
+## shadcn/ui 项目
+
+项目根目录有 `components.json` 就是 shadcn/ui 项目。它的组件目录（`components.json` 里 `aliases.ui` 指向的位置，通常是 `components/ui/`）是从上游拷进来的代码，本身已经在用 `bg-primary`、`border-input`、`text-muted-foreground` 这套语义 token。
+
+- **token 沿用 shadcn 的命名和位置**：在 `globals.css` 的 `:root`、`.dark`、`@theme inline` 里改值或新增，不要另起一套。换主题就是改这里的变量。
+- **添加组件用 CLI**：`npx shadcn@latest add button`，不要手写，也不要从文档复制粘贴。
+- **不为了过检查去改 shadcn 原有的值**：比如 checkbox 的 `rounded-[4px]`、chart 组件里匹配 recharts 的选择器。这些是上游有意调的细节，改了会跟官方版本走样，以后用 `npx shadcn@latest diff` 更新时还会冲突。
+- **定制组件时，新写的样式必须用 token**：比如给 Button 加一个 `success` 变体，先确认 `--success`、`--success-foreground` 已经存在（没有就先加），再写 `bg-success text-success-foreground`；不要写 `bg-green-600`。
+- **业务代码里优先用组件的变体**（`variant`、`size`），不要在外面用 `className` 覆盖一堆颜色。
+
+检查行为：审计默认跳过 shadcn 组件目录；hook 仍然检查这个目录，但只报这次新写的内容，原有的写法不报。
+
 ## 自动检查
 
-这个插件带一个 hook：每次 Write / Edit 样式相关的文件后，会检查**这次新写入的内容**里有没有：
+这个插件带一个 hook：每次 Write / Edit 样式相关的文件后，只报告这次改动**新引入**的问题。被替换掉的旧内容里本来就有的不报，注释行也不检查。检查的内容包括：
 - 任意颜色值 `bg-[#xxx]`
 - 间距、字号、圆角、行高、字距的任意尺寸 `p-[13px]`、`text-[15px]`
 - 原始色板类名 `bg-blue-500`
@@ -223,6 +235,7 @@ const primary = css.getPropertyValue('--primary').trim();
 {
   "disabled": false,
   "allowPaletteColors": false,
+  "auditShadcnUi": false,
   "ignore": ["src/legacy/**", "**/*.stories.tsx"]
 }
 ```

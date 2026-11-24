@@ -1,0 +1,21 @@
+{
+  "name": "seansongx",
+  "description": "seansongx 的 Claude Code 插件合集",
+  "owner": {
+    "name": "seansongx",
+    "url": "https://github.com/seansongx"
+  },
+  "metadata": {
+    "description": "seansongx 的 Claude Code 插件合集"
+  },
+  "plugins": [
+    {
+      "name": "tailwind-tokens",
+      "source": "./plugins/tailwind-tokens",
+      "description": "让 AI 先定义设计 token，再在全项目统一使用：禁止硬编码颜色、任意值和原始色板类名，改完样式自动检查。",
+      "version": "0.1.0",
+      "category": "frontend",
+      "keywords": ["tailwind", "design-tokens", "css", "design-system"]
+    }
+  ]
+}

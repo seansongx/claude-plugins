@@ -24,9 +24,11 @@
 | 规则 | 例子 | 应改为 |
 |---|---|---|
 | `arbitrary-color` | `bg-[#3b82f6]` | `bg-primary` |
-| `arbitrary-size` | `p-[13px]`、`text-[15px]`、`rounded-[6px]` | `p-3`、`text-sm`、`rounded-md` |
+| `arbitrary-size` | `p-[13px]`、`text-[15px]`、`rounded-[6px]` | 就近用 `p-3`、`text-sm`、`rounded-md`；确实需要新档位就先加 token，如 `rounded-card` |
 | `palette-color` | `bg-blue-500`、`text-gray-600` | `bg-primary`、`text-muted-foreground` |
 | `hardcoded-style-color` | `color: #333`、`style={{ color: '#333' }}`、`fill="#333"` | `var(--foreground)`、`currentColor` |
+
+缺少的尺寸、圆角、字号、颜色，规则是**先就近对齐现有刻度；确实需要新档位，就先在 token 文件里加（按用途命名，如 `rounded-card`、`text-display`），再使用**。详见 [SKILL.md](skills/tailwind-tokens/SKILL.md)。
 
 不检查：
 - 一次性的布局尺寸，如 `w-[320px]`、`h-[100dvh]`

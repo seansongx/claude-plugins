@@ -67,7 +67,7 @@ const RULES = [
   {
     id: 'arbitrary-size',
     re: new RegExp(`(?<![\\w-])-?${SIZE_UTILS}-\\[-?[\\d.]+(?:px|rem|em)\\]`, 'g'),
-    hint: '任意尺寸 → 改用默认刻度（p-4、text-sm、rounded-lg）或 @theme 里定义的 token',
+    hint: '任意尺寸 → 先就近用现有刻度（p-3、text-sm、rounded-md）；确实需要新档位，先在 @theme 里加 token（如 --radius-card）再用 rounded-card',
   },
   {
     id: 'palette-color',

@@ -138,10 +138,10 @@ theme: {
 | 类别 | ✅ 这样写 | ❌ 不要这样写 |
 |---|---|---|
 | 颜色 | `bg-primary text-primary-foreground`、`text-muted-foreground`、`border-border`、`bg-primary/10` | `bg-blue-500`、`text-gray-600`、`bg-[#3b82f6]` |
-| 间距 | 默认刻度 `p-4 gap-6 mt-8` | `p-[13px]`、`mt-[18px]` |
+| 间距 | 4px 网格刻度 `p-4 gap-6 mt-18`，或自定义的 `h-header` | `p-[13px]`、`mt-[18px]` |
 | 字号 | `text-sm`、`text-2xl`、自定义的 `text-display` | `text-[15px]` |
-| 圆角 | `rounded-md`、`rounded-lg` | `rounded-[6px]` |
-| 阴影 | `shadow-sm`、`@theme` 里定义的阴影 | `shadow-[0_2px_8px_rgba(0,0,0,.1)]` |
+| 圆角 | `rounded-md`、`rounded-lg`、自定义的 `rounded-card` | `rounded-[6px]` |
+| 阴影 | `shadow-sm`、自定义的 `shadow-card` | `shadow-[0_2px_8px_rgba(0,0,0,.1)]` |
 | 内联样式 / CSS | `color: var(--foreground)`、`style={{ color: 'var(--primary)' }}` | `color: #333`、`style={{ color: '#333' }}` |
 | SVG 图标 | `fill="currentColor"` + 外层文字颜色类 | `fill="#333"` |
 
@@ -149,13 +149,52 @@ theme: {
 - 一次性的布局尺寸：`w-[320px]`、`max-w-[1200px]`、`h-[100dvh]`、`grid-cols-[200px_1fr]`。如果同一个值在多处出现，就该提成 token（v4 用 `--container-*`、`--spacing-*`）。
 - `bg-white`、`bg-black`、`bg-transparent`、`text-current`。不过能用语义颜色时优先用语义颜色，否则暗色模式会出问题。
 
-## 需要一个新值时
+## 需要一个现有 token 里没有的值时
 
-1. **先复用**：在现有 token 里找最接近的。差别很小（比如 14px 和 15px、两个几乎一样的灰），直接用已有的。
-2. **再新增**：确实需要新值，就先加到 token 文件，再在组件里引用。不要先写死、以后再提取。
-3. **按用途命名，不按外观命名**：`--success`、`--surface-raised`，而不是 `--green`、`--gray-light`。
-4. 加了颜色 token，就要同时给出 `.dark` 里的对应值。
-5. 在回复里告诉用户新增了哪些 token。
+适用于颜色、间距、尺寸、圆角、字号、行高、字距、阴影。
+
+**原则：组件里永远不写任意值。缺什么，先加到 token 文件，再引用。** 但加之前先做下面的判断，否则 token 会越加越多，失去约束的意义。
+
+### 1. 先对齐现有刻度
+
+- **间距**：Tailwind v4 的间距按 `--spacing`（默认 0.25rem，也就是 4px）的倍数生成，`p-13`、`mt-18`、`gap-4.5` 这类写法不用加 token 就能用。设计稿上的 13px、18px 就近对齐到 4px 网格：12px（`p-3`）、16px（`p-4`）、20px（`p-5`）。
+- **圆角、字号、阴影、行高**：先看默认档位和已有 token。差 1–2px 的，直接用最近的一档。
+- **颜色**：先在已有语义颜色里找。两个几乎一样的灰色，用已有的那个。
+
+### 2. 确实需要新档位，才新增
+
+满足任一条件才值得加：
+- 设计里反复出现，而且和现有档位差别明显
+- 代表一个固定的用途，比如卡片圆角、页头高度、大标题字号、侧栏宽度
+- 一次性的布局尺寸（如 `w-[320px]`）在两处以上出现
+
+### 3. 加到对应的命名空间，Tailwind 会自动生成类名
+
+| 要加的 | Tailwind v4（写在 `@theme` 里） | 生成的类 |
+|---|---|---|
+| 圆角 | `--radius-card: 0.875rem;` | `rounded-card` |
+| 字号 | `--text-display: 3rem;`<br>`--text-display--line-height: 1.1;` | `text-display` |
+| 命名的间距/尺寸 | `--spacing-header: 4.5rem;` | `h-header`、`pt-header`、`gap-header` |
+| 容器宽度 | `--container-page: 75rem;` | `max-w-page` |
+| 阴影 | `--shadow-card: 0 1px 3px oklch(0 0 0 / 0.08);` | `shadow-card` |
+| 行高 | `--leading-body: 1.75;` | `leading-body` |
+| 字距 | `--tracking-title: -0.02em;` | `tracking-title` |
+| 颜色 | `:root` 里加 `--success: …;`，`.dark` 里给暗色值，<br>`@theme inline` 里加 `--color-success: var(--success);` | `bg-success`、`text-success` |
+
+Tailwind v3 写在 `tailwind.config.*` 的 `theme.extend` 里，对应的键是 `borderRadius`、`fontSize`、`spacing`、`maxWidth`、`boxShadow`、`lineHeight`、`letterSpacing`、`colors`。
+
+### 4. 命名规则
+
+- **按用途或档位命名，不按数值、不按外观**：用 `rounded-card`、`text-display`、`h-header`、`bg-success`；不要用 `rounded-14`、`text-15px`、`bg-green`。
+- 通用档位接着已有档位命名，特定用途按用途命名。
+- 同一个值不要定义两个名字；新值和已有 token 很接近时，用已有的。
+- 项目里已有命名习惯（例如 shadcn/ui），就沿用它。
+
+### 5. 告诉用户
+
+在回复里列出新增了哪些 token、值是多少、为什么现有的不够用。
+
+**不要先写死、以后再提取。**
 
 ## 第三方库、图表、Canvas
 

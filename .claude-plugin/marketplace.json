@@ -16,6 +16,14 @@
       "version": "0.2.0",
       "category": "frontend",
       "keywords": ["tailwind", "design-tokens", "css", "design-system"]
+    },
+    {
+      "name": "project-docs",
+      "source": "./plugins/project-docs",
+      "description": "给项目定一套文档规范并强制执行：功能、需求、计划、决策各有唯一位置，AI 不能到处新建 .md，计划做完就删，索引自动生成。",
+      "version": "0.1.0",
+      "category": "productivity",
+      "keywords": ["docs", "documentation", "specs", "adr", "conventions"]
     }
   ]
 }

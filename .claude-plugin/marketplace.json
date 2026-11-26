@@ -13,7 +13,7 @@
       "name": "tailwind-tokens",
       "source": "./plugins/tailwind-tokens",
       "description": "让 AI 先定义设计 token，再在全项目统一使用：禁止硬编码颜色、任意值和原始色板类名，改完样式自动检查。",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "category": "frontend",
       "keywords": ["tailwind", "design-tokens", "css", "design-system"]
     },

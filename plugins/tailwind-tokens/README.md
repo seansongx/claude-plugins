@@ -44,6 +44,8 @@
 - **审计默认跳过 shadcn 组件目录**（`aliases.ui`，通常是 `components/ui/`）。这是上游代码，像 checkbox 的 `rounded-[4px]` 这类有意调的细节，不应该为了过检查去改，改了以后用 `npx shadcn diff` 更新时还会冲突。
 - **hook 仍然检查这个目录，但只报新写的内容**。定制 shadcn 组件时，新加的样式仍然要用 token。
 
+Monorepo：每个子包按自己的 `components.json` 识别组件目录，从仓库根审计整个仓库时也一样，各子包的组件目录都会被跳过。
+
 ## 项目配置（可选）
 
 `.claude/tailwind-tokens.json`：
@@ -65,6 +67,7 @@ Monorepo：配置放在仓库根的 `.claude/` 即可，对子包跑审计或在
 
 ## 更新记录
 
+- **0.2.2**：从仓库根审计 monorepo 时，识别各子包自己的 `components.json`
 - **0.2.1**：monorepo 里对子包跑审计时，也能读到仓库根的配置
 - **0.2.0**：hook 只报新引入的问题；自动识别 shadcn/ui，审计时跳过组件目录；不再误报注释和选择器
 - **0.1.1**：缺少的尺寸、圆角、字号先就近对齐，确实需要再新增 token

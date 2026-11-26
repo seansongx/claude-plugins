@@ -110,11 +110,10 @@ function globToRegExp(glob) {
   return new RegExp(`^${re}$`);
 }
 
-// 返回 { root, pkgRoot }：
-//   root    配置文件所在的目录，ignore 的 glob 和输出路径都相对它。
-//           一直往上找到仓库边界（.git）为止，所以 monorepo 里对子包跑审计时，
-//           仓库根的 .claude/tailwind-tokens.json 也能读到。没有配置文件时等于 pkgRoot。
-//   pkgRoot 离起点最近的 package.json / .git 所在目录（子包自己的根）。
+// 项目根 = 配置文件所在的目录，ignore 的 glob 和输出路径都相对它。
+// 一直往上找到仓库边界（.git）为止，所以 monorepo 里对子包跑审计时，
+// 仓库根的 .claude/tailwind-tokens.json 也能读到。
+// 没有配置文件时，取离起点最近的 package.json / .git 所在目录。
 function findProjectRoot(start) {
   const from = path.resolve(start);
   let pkgRoot = null;
@@ -123,13 +122,13 @@ function findProjectRoot(start) {
     const isRepoRoot = fs.existsSync(path.join(dir, '.git'));
     if (!pkgRoot && (isRepoRoot || fs.existsSync(path.join(dir, 'package.json')))) pkgRoot = dir;
     if (fs.existsSync(path.join(dir, '.claude', 'tailwind-tokens.json'))) {
-      return { root: dir, pkgRoot: pkgRoot || dir };
+      return dir;
     }
     const parent = path.dirname(dir);
     if (isRepoRoot || parent === dir) break;
     dir = parent;
   }
-  return { root: pkgRoot || from, pkgRoot: pkgRoot || from };
+  return pkgRoot || from;
 }
 
 // 读取 shadcn/ui 的 components.json，返回组件目录（如 "components/ui"）
@@ -145,20 +144,44 @@ function detectShadcnUi(root) {
   }
 }
 
-function loadConfig(root, pkgRoot = root) {
+// 找到管着 dir 的那份 components.json：从 dir 往上找到项目根为止，取最近的一份。
+// monorepo 里每个子包可以有自己的 components.json，所以按目录查，结果缓存。
+const shadcnCache = new Map();
+function shadcnFor(dir, root) {
+  if (shadcnCache.has(dir)) return shadcnCache.get(dir);
+  let info = null;
+  const uiDir = detectShadcnUi(dir);
+  if (uiDir) {
+    info = { base: dir, uiDir, re: globToRegExp(`**/${uiDir}/**`) };
+  } else {
+    const parent = path.dirname(dir);
+    if (dir !== root && parent !== dir) info = shadcnFor(parent, root);
+  }
+  shadcnCache.set(dir, info);
+  return info;
+}
+
+// 文件在 shadcn 组件目录里时，返回这个目录（相对项目根），否则返回 null
+function shadcnUiDirOf(file, root) {
+  const info = shadcnFor(path.dirname(file), root);
+  if (!info) return null;
+  const rel = toPosix(path.relative(info.base, file));
+  if (!info.re.test(rel)) return null;
+  const at = `/${rel}`.indexOf(`/${info.uiDir}/`);
+  return toPosix(path.relative(root, path.join(info.base, rel.slice(0, at + info.uiDir.length))));
+}
+
+function loadConfig(root) {
   let raw = {};
   try {
     raw = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'tailwind-tokens.json'), 'utf8'));
   } catch { /* 没有配置文件就用默认值 */ }
-  // components.json 通常在子包里，先看子包，再看配置所在的根
-  const shadcnUiDir = detectShadcnUi(pkgRoot) || (pkgRoot !== root ? detectShadcnUi(root) : null);
   return {
     disabled: !!raw.disabled,
     allowPaletteColors: !!raw.allowPaletteColors,
     auditShadcnUi: !!raw.auditShadcnUi,
     ignore: (raw.ignore || []).map(globToRegExp),
-    shadcnUiDir,
-    shadcnUi: shadcnUiDir ? globToRegExp(`**/${shadcnUiDir}/**`) : null,
+    skippedShadcnDirs: new Set(), // 审计时实际跳过的 shadcn 组件目录
   };
 }
 
@@ -169,7 +192,10 @@ function shouldCheck(file, root, cfg, mode) {
   if (rel.split('/').some((seg) => SKIP_DIRS.has(seg))) return false;
   if (cfg.ignore.some((re) => re.test(rel))) return false;
   // shadcn 组件是上游代码：审计时默认跳过；hook 仍然检查，但只报新引入的问题
-  if (mode === 'audit' && cfg.shadcnUi && !cfg.auditShadcnUi && cfg.shadcnUi.test(rel)) return false;
+  if (mode === 'audit' && !cfg.auditShadcnUi) {
+    const uiDir = shadcnUiDirOf(file, root);
+    if (uiDir) { cfg.skippedShadcnDirs.add(uiDir); return false; }
+  }
   return true;
 }
 
@@ -253,8 +279,8 @@ async function hookMode() {
   const file = ti.file_path;
   if (!file) return 0;
 
-  const { root, pkgRoot } = findProjectRoot(input.cwd || path.dirname(file));
-  const cfg = loadConfig(root, pkgRoot);
+  const root = findProjectRoot(input.cwd || path.dirname(file));
+  const cfg = loadConfig(root);
   if (cfg.disabled || !shouldCheck(file, root, cfg)) return 0;
 
   let full = '';
@@ -320,8 +346,8 @@ function walk(dir, root, cfg, files = []) {
 
 function auditMode(target) {
   const dir = path.resolve(target || '.');
-  const { root, pkgRoot } = findProjectRoot(dir);
-  const cfg = loadConfig(root, pkgRoot);
+  const root = findProjectRoot(dir);
+  const cfg = loadConfig(root);
   if (cfg.disabled) {
     console.log('[tailwind-tokens] 检查已在 .claude/tailwind-tokens.json 中关闭。');
     return 0;
@@ -344,9 +370,10 @@ function auditMode(target) {
     }
   }
 
-  if (cfg.shadcnUi && !cfg.auditShadcnUi) {
+  if (cfg.skippedShadcnDirs.size) {
+    const dirs = [...cfg.skippedShadcnDirs].sort().map((d) => `${d}/`).join('、');
     console.log(
-      `[tailwind-tokens] 检测到 shadcn/ui，已跳过组件目录 ${cfg.shadcnUiDir}/` +
+      `[tailwind-tokens] 检测到 shadcn/ui，已跳过组件目录 ${dirs}` +
       '（上游代码，不为了过检查去改；要包含它，在 .claude/tailwind-tokens.json 设 "auditShadcnUi": true）\n',
     );
   }

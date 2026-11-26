@@ -110,15 +110,26 @@ function globToRegExp(glob) {
   return new RegExp(`^${re}$`);
 }
 
+// 返回 { root, pkgRoot }：
+//   root    配置文件所在的目录，ignore 的 glob 和输出路径都相对它。
+//           一直往上找到仓库边界（.git）为止，所以 monorepo 里对子包跑审计时，
+//           仓库根的 .claude/tailwind-tokens.json 也能读到。没有配置文件时等于 pkgRoot。
+//   pkgRoot 离起点最近的 package.json / .git 所在目录（子包自己的根）。
 function findProjectRoot(start) {
-  let dir = path.resolve(start);
+  const from = path.resolve(start);
+  let pkgRoot = null;
+  let dir = from;
   for (;;) {
-    if (fs.existsSync(path.join(dir, '.claude', 'tailwind-tokens.json'))) return dir;
-    if (fs.existsSync(path.join(dir, 'package.json')) || fs.existsSync(path.join(dir, '.git'))) return dir;
+    const isRepoRoot = fs.existsSync(path.join(dir, '.git'));
+    if (!pkgRoot && (isRepoRoot || fs.existsSync(path.join(dir, 'package.json')))) pkgRoot = dir;
+    if (fs.existsSync(path.join(dir, '.claude', 'tailwind-tokens.json'))) {
+      return { root: dir, pkgRoot: pkgRoot || dir };
+    }
     const parent = path.dirname(dir);
-    if (parent === dir) return path.resolve(start);
+    if (isRepoRoot || parent === dir) break;
     dir = parent;
   }
+  return { root: pkgRoot || from, pkgRoot: pkgRoot || from };
 }
 
 // 读取 shadcn/ui 的 components.json，返回组件目录（如 "components/ui"）
@@ -134,12 +145,13 @@ function detectShadcnUi(root) {
   }
 }
 
-function loadConfig(root) {
+function loadConfig(root, pkgRoot = root) {
   let raw = {};
   try {
     raw = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'tailwind-tokens.json'), 'utf8'));
   } catch { /* 没有配置文件就用默认值 */ }
-  const shadcnUiDir = detectShadcnUi(root);
+  // components.json 通常在子包里，先看子包，再看配置所在的根
+  const shadcnUiDir = detectShadcnUi(pkgRoot) || (pkgRoot !== root ? detectShadcnUi(root) : null);
   return {
     disabled: !!raw.disabled,
     allowPaletteColors: !!raw.allowPaletteColors,
@@ -241,8 +253,8 @@ async function hookMode() {
   const file = ti.file_path;
   if (!file) return 0;
 
-  const root = findProjectRoot(input.cwd || path.dirname(file));
-  const cfg = loadConfig(root);
+  const { root, pkgRoot } = findProjectRoot(input.cwd || path.dirname(file));
+  const cfg = loadConfig(root, pkgRoot);
   if (cfg.disabled || !shouldCheck(file, root, cfg)) return 0;
 
   let full = '';
@@ -308,8 +320,8 @@ function walk(dir, root, cfg, files = []) {
 
 function auditMode(target) {
   const dir = path.resolve(target || '.');
-  const root = findProjectRoot(dir);
-  const cfg = loadConfig(root);
+  const { root, pkgRoot } = findProjectRoot(dir);
+  const cfg = loadConfig(root, pkgRoot);
   if (cfg.disabled) {
     console.log('[tailwind-tokens] 检查已在 .claude/tailwind-tokens.json 中关闭。');
     return 0;

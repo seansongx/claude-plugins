@@ -59,10 +59,13 @@
 
 - `allowPaletteColors`：老项目暂时不想管色板类名时设为 `true`
 - `auditShadcnUi`：审计时也检查 shadcn 组件目录
-- `ignore`：跳过的路径（glob，相对项目根）
+- `ignore`：跳过的路径（glob，相对配置文件所在的项目根）
+
+Monorepo：配置放在仓库根的 `.claude/` 即可，对子包跑审计或在子包里改文件时也会读到；`ignore` 的路径相对仓库根，例如 `packages/web/scripts/**` 或 `**/scripts/**`。子包自己有 `.claude/tailwind-tokens.json` 时用子包的。
 
 ## 更新记录
 
+- **0.2.1**：monorepo 里对子包跑审计时，也能读到仓库根的配置
 - **0.2.0**：hook 只报新引入的问题；自动识别 shadcn/ui，审计时跳过组件目录；不再误报注释和选择器
 - **0.1.1**：缺少的尺寸、圆角、字号先就近对齐，确实需要再新增 token
 - **0.1.0**：首个版本

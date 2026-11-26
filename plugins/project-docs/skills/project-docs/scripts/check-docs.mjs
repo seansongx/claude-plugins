@@ -44,7 +44,10 @@ const DEFAULT_ALLOW = [
   '.claude/**', '.github/**',
 ];
 
-const RULES_BLOCK = `${RULES_START}
+// 更新日志的各种叫法：只认 CHANGELOG.md
+const CHANGELOG_LIKE = /^(changelog|change[-_ ]?log|history|changes|releases|release[-_ ]?notes|更新日志|更新记录|变更日志)\.md$/i;
+
+const RULES_BLOCK =`${RULES_START}
 ## 文档
 
 文档索引在 \`docs/README.md\`。写或改文档前先读它。
@@ -57,6 +60,7 @@ const RULES_BLOCK = `${RULES_START}
 - 改代码让文档失效时，同一次提交里改文档。
 - 代码里能看出来的（参数、字段、目录结构）不写进文档。
 - Bug 和任务提 issue，不写进文档。
+- 更新日志只有一份 \`CHANGELOG.md\`：只写用户能感知的变化，按版本分 新增 / 变更 / 修复 / 移除，同主题并进已有条目，已发布的版本不再改动。
 - 改完文档运行 \`node scripts/check-docs.mjs --index\` 更新索引，再运行 \`node scripts/check-docs.mjs --check\`。
 ${RULES_END}`;
 
@@ -120,7 +124,14 @@ const inSkippedDir = (rel) => rel.split('/').slice(0, -1).some((seg) => SKIP_DIR
 function placementProblem(rel, config) {
   if (matchAny(rel, config.allow)) return null;
   const d = config.docsDir;
-  if (rel === d || rel.startsWith(`${d}/`)) {
+  const inDocs = rel === d || rel.startsWith(`${d}/`);
+  const base = rel.split('/').pop();
+  // specs/ 等目录里叫 history.md 的是功能文档（如"浏览历史"），不算更新日志
+  const inDocType = new RegExp(`^${d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/(specs|plans|decisions|issues)/`).test(rel);
+  if (!inDocType && CHANGELOG_LIKE.test(base) && (base !== 'CHANGELOG.md' || inDocs)) {
+    return `更新日志统一叫 CHANGELOG.md，放在发布单元的根目录（仓库根或应用目录），不放进 ${d}/，一个发布单元只有一份`;
+  }
+  if (inDocs) {
     const sub = rel.slice(d.length + 1);
     if (sub === 'README.md' || sub === 'architecture.md') return null;
     if (/^specs\/.+\.md$/.test(sub)) return null;
@@ -430,6 +441,7 @@ async function hook() {
   ${d}/plans/<主题>.md           进行中的计划，做完并入 spec 后删除
   ${d}/decisions/NNNN-<标题>.md  决策记录，写完不改
   ${d}/architecture.md           架构
+  CHANGELOG.md                   面向用户的版本变化，在发布单元的根目录，只有一份
 
 如果这是工作总结、改动说明或分析报告：不要写成文件，直接在回复里说，或写进 commit message。
 如果是 Bug 或任务：提 issue，不写成文档。

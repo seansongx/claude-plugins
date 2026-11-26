@@ -27,6 +27,7 @@
 | 插件 | 说明 |
 |---|---|
 | [tailwind-tokens](plugins/tailwind-tokens) | 让 AI 先定义设计 token 再统一使用：禁止硬编码颜色、任意值和原始色板类名，改完样式自动检查 |
+| [project-docs](plugins/project-docs) | 给项目定一套文档规范并强制执行：功能、需求、计划、决策各有唯一位置，AI 不能到处新建 `.md`，计划做完就删 |
 
 ## 新增插件
 
